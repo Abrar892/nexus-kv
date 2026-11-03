@@ -115,6 +115,8 @@ class CommandDispatcher:
 
         try:
             result = handler(args)
+            if isinstance(result, bytes):
+                return result, is_mutation
             return RespSerializer.serialize(result), is_mutation
         except (ValueError, TypeError) as err:
             return RespSerializer.error(f"ERR {err}"), False

@@ -27,6 +27,7 @@ class DataEntry:
     created_at: float
     expires_at: Optional[float] = None
     last_accessed: float = 0.0
+    access_order: int = 0
     access_count: int = 1
 
     def is_expired(self, now: Optional[float] = None) -> bool:
@@ -35,8 +36,9 @@ class DataEntry:
         current_time = now if now is not None else time.time()
         return current_time >= self.expires_at
 
-    def touch(self, now: Optional[float] = None) -> None:
+    def touch(self, now: Optional[float] = None, order: int = 0) -> None:
         self.last_accessed = now if now is not None else time.time()
+        self.access_order = order
         self.access_count += 1
 
 
@@ -54,6 +56,7 @@ class MemoryStore:
         self.eviction_policy = eviction_policy
         self._store: Dict[str, DataEntry] = {}
         self._lock = threading.RLock()
+        self._access_counter = 0
 
         # Operational metrics
         self.hits = 0
@@ -76,7 +79,8 @@ class MemoryStore:
                 self.misses += 1
                 return None
 
-            entry.touch(now)
+            self._access_counter += 1
+            entry.touch(now, self._access_counter)
             self.hits += 1
             return entry
 
@@ -96,12 +100,14 @@ class MemoryStore:
             if key not in self._store and self.max_keys > 0 and len(self._store) >= self.max_keys:
                 self._evict()
 
+            self._access_counter += 1
             entry = DataEntry(
                 value=value,
                 data_type=data_type,
                 created_at=now,
                 expires_at=expires_at,
                 last_accessed=now,
+                access_order=self._access_counter,
                 access_count=1,
             )
             self._store[key] = entry
@@ -220,8 +226,8 @@ class MemoryStore:
         victim_key: Optional[str] = None
 
         if self.eviction_policy in (EvictionPolicy.ALLKEYS_LRU, EvictionPolicy.VOLATILE_LRU):
-            # Oldest last_accessed
-            candidates.sort(key=lambda item: item[1].last_accessed)
+            # Oldest access order
+            candidates.sort(key=lambda item: item[1].access_order)
             victim_key = candidates[0][0]
 
         elif self.eviction_policy in (EvictionPolicy.ALLKEYS_LFU, EvictionPolicy.VOLATILE_LFU):
